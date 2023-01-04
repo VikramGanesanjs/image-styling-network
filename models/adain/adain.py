@@ -21,7 +21,7 @@ class AdaIN(torch.nn.Module):
         # initialize instance normalization function
         # this is the basis of our AdaIN layer, it follows an equation similar to a z-score
         # (x - mu)/sigma
-        self.instance_norm = torch.nn.InstanceNorm2D(3)
+        self.instance_norm = torch.nn.InstanceNorm2d(3)
     
     # forward method for our layer
     # x would be the content input and y would be the style input

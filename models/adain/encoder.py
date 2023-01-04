@@ -4,7 +4,7 @@ import torchvision
 class Encoder(torch.nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
-        model = torchvision.models.vgg19(pretrained=True)
+        model = torchvision.models.vgg19(weights="DEFAULT")
         # Split the model into each ReLu layer so that we can compute the loss and train the whole model
         # There are 21 different layers in the model, but the list is not cut off there, so we need to splice it
         layers = list(model.features.children())[:21]
