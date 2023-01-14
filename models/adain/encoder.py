@@ -1,29 +1,58 @@
-import torch
-import torchvision
-
-class Encoder(torch.nn.Module):
-    def __init__(self):
-        super(Encoder, self).__init__()
-        model = torchvision.models.vgg19(weights="DEFAULT")
-        # Split the model into each ReLu layer so that we can compute the loss and train the whole model
-        # There are 21 different layers in the model, but the list is not cut off there, so we need to splice it
-        layers = list(model.features.children())[:21]
-        
-        # the eval sets our sequential model into evaluation mode, so that we can split up the layers
-        f = torch.nn.Sequential(*layers).eval()
-
-        #splitting up the layers of f
-        self.relu_1_1 = torch.nn.Sequential(*f[:2])
-        self.relu_2_1 = torch.nn.Sequential(*f[2:5], *f[5:7])
-        self.relu3_1 = torch.nn.Sequential(*f[7:10],*f[10:12])
-        self.relu4_1 = torch.nn.Sequential(*f[12:14],*f[14:16],f[16:19],*f[19:21])
+import torch.nn as nn
 
 
-    def forward(self, x):
-        #propagate through each of our sequential layers, saving each to compute the losses later
-        output1 = self.relu_1_1(x)
-        output2 = self.relu_2_1(output1)
-        output3 = self.relu3_1(output2)
-        output4 = self.relu4_1(output3)
-
-        return output1, output2, output3, output4
+encoder = nn.Sequential(
+    nn.Conv2d(3, 3, (1, 1)),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(3, 64, (3, 3)),
+    nn.ReLU(),  # relu1-1
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(64, 64, (3, 3)),
+    nn.ReLU(),  # relu1-2
+    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(64, 128, (3, 3)),
+    nn.ReLU(),  # relu2-1
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(128, 128, (3, 3)),
+    nn.ReLU(),  # relu2-2
+    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(128, 256, (3, 3)),
+    nn.ReLU(),  # relu3-1
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),  # relu3-2
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),  # relu3-3
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),  # relu3-4
+    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 512, (3, 3)),
+    nn.ReLU(),  # relu4-1, this is the last layer used
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu4-2
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu4-3
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu4-4
+    nn.MaxPool2d((2, 2), (2, 2), (0, 0), ceil_mode=True),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu5-1
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu5-2
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU(),  # relu5-3
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 512, (3, 3)),
+    nn.ReLU()  # relu5-4
+)

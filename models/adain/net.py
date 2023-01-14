@@ -1,55 +1,69 @@
 import torch
-from adain import AdaIN, mean_and_std_of_image
-from encoder import Encoder
-from decoder import Decoder
+import torch.nn as nn
+from adain import AdaIN
+from utils import *
 
-IMAGE_HEIGHT = 224
-IMAGE_WIDTH = 224
-COLOR_CHANNELS = 3
-LAMBDA = 1
-
-class StyleTransfer(torch.nn.Module):
-    def __init__(self):
+class StyleTransfer(nn.Module):
+    def __init__(self, encoder, decoder):
         super(StyleTransfer, self).__init__()
+        layers = list(encoder.children())
+        self.enc_1 = nn.Sequential(*layers[:4])  # input -> relu1_1
+        self.enc_2 = nn.Sequential(*layers[4:11])  # relu1_1 -> relu2_1
+        self.enc_3 = nn.Sequential(*layers[11:18])  # relu2_1 -> relu3_1
+        self.enc_4 = nn.Sequential(*layers[18:31])  # relu3_1 -> relu4_1]
+        self.relus = [self.enc_1, self.enc_2, self.enc_3, self.enc_4]
+        self.decoder = decoder
+        self.mse = nn.MSELoss()
         self.adain = AdaIN()
-        self.encoder = Encoder()
-        self.decoder = Decoder()
 
+        for name in ['enc_1', 'enc_2', 'enc_3', 'enc_4']:
+            for param in getattr(self, name).parameters():
+                param.requires_grad = False
+
+    def encode_with_save(self, input):
+        results = [input]
+        for i in range(4):
+            func = getattr(self, 'enc_{:d}'.format(i + 1))
+            results.append(func(results[-1]))
+        return results[1:]
+        
+    def encode(self, input):
+        res = input
+        for layer in self.relus:
+            res = layer(res)
+        return res
+    
     def forward(self, content, style):
-        c_output1, c_output2, c_output3, result_image = self.encoder(content)
-        s_output1, s_output2, s_output3, result_style = self.encoder(style)
+        encoded_style = self.encode_with_save(style)
+        encoded_content = self.encode(content)
 
-        encoded_content = [c_output1, c_output2, c_output3, result_image]
+        t = self.adain(encoded_content, encoded_style[-1])
 
-        encoded_style = [s_output1, s_output2, s_output3, result_style]
+        g_t = self.decoder(t)
 
-        style_content_combined = self.adain(result_image, result_style)
-        style_content_combined = LAMBDA * style_content_combined + (1 - LAMBDA) * result_image
+        g_t_encoding = self.encode_with_save(g_t)
 
-        final_image = self.decoder(style_content_combined)
+        s_loss = self.style_loss(g_t_encoding, encoded_style)
+        c_loss = self.content_loss(g_t_encoding[-1], t)
 
-        f_output1, f_output2, f_output3, result_f= self.encoder(final_image)
-
-        encoded_image = [f_output1, f_output2, f_output3, result_f]
-
-        return style_content_combined, encoded_style, encoded_image, final_image
+        return g_t, s_loss, c_loss
 
 
-def style_loss(encoded_image, encoded_style):
-    MSE = torch.nn.MSELoss()
-    initial_mean_image, initial_std_image = mean_and_std_of_image(encoded_image[0])
-    initial_mean_style, initial_std_style = mean_and_std_of_image(encoded_style[0])
-    loss = MSE(initial_mean_image, initial_mean_style) + MSE(initial_std_image, initial_std_style)
-    for i in range(1, 4, 1):
-        mean_image, std_image = mean_and_std_of_image(encoded_image[i])
-        mean_style, std_style = mean_and_std_of_image(encoded_style[i])
-        loss += MSE(mean_image, mean_style) + MSE(std_image, std_style)
-    return loss
+    def style_loss(self, encoded_image, encoded_style):
+        MSE = torch.nn.MSELoss()
+        initial_mean_image, initial_std_image = mean_and_std_of_image(encoded_image[0])
+        initial_mean_style, initial_std_style = mean_and_std_of_image(encoded_style[0])
+        loss = MSE(initial_mean_image, initial_mean_style) + MSE(initial_std_image, initial_std_style)
+        for i in range(1, 4, 1):
+            mean_image, std_image = mean_and_std_of_image(encoded_image[i])
+            mean_style, std_style = mean_and_std_of_image(encoded_style[i])
+            loss += MSE(mean_image, mean_style) + MSE(std_image, std_style)
+        return loss
 
 
-def content_loss(encoded_image, style_content_combined):
-    MSE = torch.nn.MSELoss()
-    return MSE(encoded_image, style_content_combined)
+    def content_loss(self, encoded_image, style_content_combined):
+        MSE = torch.nn.MSELoss()
+        return MSE(encoded_image, style_content_combined)
 
 
 

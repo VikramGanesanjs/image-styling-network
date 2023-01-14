@@ -1,101 +1,144 @@
-from net import StyleTransfer, content_loss, style_loss
+from net import StyleTransfer
 import torch
+import torch.nn as nn
+from pathlib import Path
 import torchvision
+import torch.utils.data as data
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 import torch.multiprocessing
-import numpy as np
-torch.multiprocessing.set_sharing_strategy('file_system')
+from utils import *
+import argparse
+from tqdm import tqdm
+from tensorboardX import SummaryWriter
+from decoder import decoder as Decoder
+from encoder import encoder as Encoder
+from PIL import Image, ImageFile
+
+class FlatFolderDataset(data.Dataset):
+        def __init__(self, root, transform):
+            super(FlatFolderDataset, self).__init__()
+            self.root = root
+            self.paths = list(Path(self.root).glob('*'))
+            self.transform = transform
+
+        def __getitem__(self, index):
+            path = self.paths[index]
+            img = Image.open(str(path)).convert('RGB')
+            img = self.transform(img)
+            return img
+
+        def __len__(self):
+            return len(self.paths)
+
+        def name(self):
+            return 'FlatFolderDataset'
+
+def main():
+    torch.multiprocessing.set_sharing_strategy('file_system')
+
+    # Set the path to the dataset directory
+    content_dataset_dir = '../../content-dataset/images/images'
+    style_dataset_dir = '../../style-dataset/images'
 
 
-mps_device = torch.device("mps")
-
-# Define training constants, learning rate, and optimizer
-LR = 1e-4
-epochs = 1
-style_transfer_network = StyleTransfer()
-style_transfer_network.to(mps_device)
-optimizer = torch.optim.Adam(style_transfer_network.decoder.parameters(), lr=LR)
-BATCH_SIZE = 16
+    def train_transform():
+        transform_list = [
+            transforms.Resize(size=(512, 512)),
+            transforms.RandomCrop(256),
+            transforms.ToTensor()
+        ]
+        return transforms.Compose(transform_list)
 
 
-# Helper image show method
+    
 
-def concat_img(imgs):
-    plt.figure()
-    #imgs = (imgs + 1) / 2
-    imgs = imgs.movedim((0, 1, 2, 3), (0, 3, 1, 2)).detach().cpu().numpy() 
-    axs = plt.imshow(np.concatenate(imgs.tolist(), axis=1))
-    plt.axis('off')
-    plt.show()
+    parser = argparse.ArgumentParser()
+    # Basic options
+    parser.add_argument('--content_dir', default=content_dataset_dir, type=str,
+                        help='Directory path to a batch of content images')
+    parser.add_argument('--style_dir', default=style_dataset_dir, type=str,
+                        help='Directory path to a batch of style images')
+    parser.add_argument('--encoder', type=str, default='./vgg_normalised.pth')
 
-
-#import datasets
-
-# Set the path to the dataset directory
-content_dataset_dir = '../../content-dataset/images/images'
-style_dataset_dir = '../../style-dataset/images/images'
-
-# Define the transforms to apply to the images
-transform = transforms.Compose([
-    transforms.Resize(256),
-    transforms.CenterCrop(224),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-])
-
-# Load the dataset
-content_dataset = torchvision.datasets.ImageFolder(content_dataset_dir, transform=transform)
-style_dataset = torchvision.datasets.ImageFolder(style_dataset_dir, transform=transform)
-# Create a data loader to iterate over the dataset
-content_data_loader = torch.utils.data.DataLoader(content_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
-style_data_loader = torch.utils.data.DataLoader(style_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
+    # training options
+    parser.add_argument('--save_dir', default='../saved-models',
+                        help='Directory to save the model')
+    parser.add_argument('--log_dir', default='./logs',
+                        help='Directory to save the log')
+    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr_decay', type=float, default=5e-5)
+    parser.add_argument('--max_iter', type=int, default=8000)
+    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--style_weight', type=float, default=10.0)
+    parser.add_argument('--content_weight', type=float, default=1.0)
+    parser.add_argument('--n_threads', type=int, default=8)
+    parser.add_argument('--save_model_interval', type=int, default=500)
+    parser.add_argument('--save-image-interval', type=int, default=50)
+    args = parser.parse_args()
 
 
 
 
-
-decoder = style_transfer_network.decoder
-encoder = style_transfer_network.encoder
-
-def train():
-    for epoch in range(epochs):
-        #train the decoder initially
-        decoder.train()
-
-        for batch, (content, _) in enumerate(content_data_loader):
-            style, _ = next(iter(style_data_loader))
-            content = content.to(mps_device)
-            style = style.to(mps_device)
-
-            # # Reset the gradients so that they do not get too high
-            decoder.zero_grad()
-
-            # Run the content and style through the model
-            style_content_combined, encoded_style, encoded_content, final_image = style_transfer_network.forward(content, style)
+    device = torch.device('mps')
+    save_dir = Path(args.save_dir)
+    save_dir.mkdir(exist_ok=True, parents=True)
+    log_dir = Path(args.log_dir)
+    log_dir.mkdir(exist_ok=True, parents=True)
+    writer = SummaryWriter(log_dir=str(log_dir))
 
 
-            # Compute losses as outlined in the paper
-            c_loss = content_loss(encoded_content[3], style_content_combined)
-            s_loss = style_loss(encoded_content, encoded_style)
+    decoder = Decoder
+    encoder = Encoder
 
-            # Total loss weights style_loss doubly
-            total_loss = c_loss + 2 * s_loss
+    encoder.load_state_dict(torch.load(args.encoder))
+    encoder = nn.Sequential(*list(encoder.children())[:31])
+    network = StyleTransfer(encoder, decoder)
+    network.train()
+    network.to(device)
 
-            # Backpropagate through the network
-            total_loss.backward()
-            # Change the weights according to the gradients created in the previous step
-            optimizer.step()
+    content_dataset = FlatFolderDataset(args.content_dir, transform=train_transform())
+    style_dataset = FlatFolderDataset(args.style_dir, transform=train_transform())
 
-            
-            print("Epoch {}, Batch {}, Content Loss {}, Style Loss {}, Total Loss {}".format(epoch, batch, c_loss, s_loss, total_loss))
+    print(len(content_dataset), len(style_dataset))
 
-            if batch % 100 == 0:
-                
-                print_img = torch.cat((content[:1], style[:1], final_image[:1]), 3).detach().cpu()
-                concat_img(print_img)
-        
+    content_iter = iter(data.DataLoader(
+        content_dataset, batch_size=args.batch_size,
+        num_workers=args.n_threads))
+    style_iter = iter(data.DataLoader(
+        style_dataset, batch_size=args.batch_size,
+        num_workers=args.n_threads))
+    optimizer = torch.optim.Adam(network.decoder.parameters(), lr=args.lr)
+
+
+    for batch in tqdm(range(args.max_iter)):
+        adjust_learning_rate(optimizer, batch, args.lr_decay, args.lr)
+        content_images = next(content_iter).to(device)
+        style_images = next(style_iter).to(device)
+        final_image, s_loss, c_loss = network(content_images, style_images)
+        c_loss = args.content_weight * c_loss
+        s_loss = args.style_weight * s_loss
+        total_loss = c_loss + s_loss
+
+        optimizer.zero_grad()
+        total_loss.backward()
+        optimizer.step()
+
+        writer.add_scalar('loss_content', c_loss.item(), batch + 1)
+        writer.add_scalar('loss_style', s_loss.item(), batch + 1)
+
+        if (batch + 1) % args.save_model_interval == 0 or (batch + 1) == args.max_iter:
+            state_dict = network.decoder.state_dict()
+            for key in state_dict.keys():
+                state_dict[key] = state_dict[key].to(torch.device('cpu'))
+            torch.save(state_dict, save_dir /
+                    'decoder_iter_{:d}.pth.tar'.format(batch + 1))
+
+        if (batch + 1) % args.save_image_interval == 0:
+            print_img = torch.cat((content_images[:1], style_images[:1], final_image[:1]), 3).detach().cpu()
+            concat_img(print_img, batch)
+    writer.close()
 
 
 if __name__ == "__main__":
-    train()
+    main()
