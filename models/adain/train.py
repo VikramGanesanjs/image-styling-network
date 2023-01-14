@@ -3,6 +3,10 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
+import torch.multiprocessing
+import numpy as np
+torch.multiprocessing.set_sharing_strategy('file_system')
+
 
 mps_device = torch.device("mps")
 
@@ -12,7 +16,18 @@ epochs = 1
 style_transfer_network = StyleTransfer()
 style_transfer_network.to(mps_device)
 optimizer = torch.optim.Adam(style_transfer_network.decoder.parameters(), lr=LR)
-BATCH_SIZE = 3
+BATCH_SIZE = 16
+
+
+# Helper image show method
+
+def concat_img(imgs):
+    plt.figure()
+    #imgs = (imgs + 1) / 2
+    imgs = imgs.movedim((0, 1, 2, 3), (0, 3, 1, 2)).detach().cpu().numpy() 
+    axs = plt.imshow(np.concatenate(imgs.tolist(), axis=1))
+    plt.axis('off')
+    plt.show()
 
 
 #import datasets
@@ -52,11 +67,9 @@ def train():
             style, _ = next(iter(style_data_loader))
             content = content.to(mps_device)
             style = style.to(mps_device)
-            print(content.device, style.device)
 
-            # Reset the gradients so that they do not get too high
+            # # Reset the gradients so that they do not get too high
             decoder.zero_grad()
-            print(content.type(), style.type())
 
             # Run the content and style through the model
             style_content_combined, encoded_style, encoded_content, final_image = style_transfer_network.forward(content, style)
@@ -74,27 +87,14 @@ def train():
             # Change the weights according to the gradients created in the previous step
             optimizer.step()
 
-            if batch % 10 == 0:
-                print("Epoch {}, Batch {}, Content Loss {}, Style Loss {}, Total Loss {}".format(epoch, batch, c_loss, s_loss, total_loss))
+            
+            print("Epoch {}, Batch {}, Content Loss {}, Style Loss {}, Total Loss {}".format(epoch, batch, c_loss, s_loss, total_loss))
 
-            if batch % 100 == 0 and batch != 0:
-                final_image_display = final_image.permute(1, 2, 0)
-                content_image = content.permute(1, 2, 0)
-                style_image = style.permute(1, 2, 0)
-                final_image_display = final_image_display.cpu()
-
-                content_image = content_image.cpu()
-                style_image = style_image.cpu()
-
-                plt.imshow(content_image)
-                plt.show()
-
-                plt.imshow(style_image)
-                plt.show()
-
-                plt.imshow(final_image_display)
-                plt.show()
-
+            if batch % 100 == 0:
+                
+                print_img = torch.cat((content[:1], style[:1], final_image[:1]), 3).detach().cpu()
+                concat_img(print_img)
+        
 
 
 if __name__ == "__main__":
