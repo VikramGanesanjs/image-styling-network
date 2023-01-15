@@ -34,13 +34,17 @@ class StyleTransfer(nn.Module):
         return res
     
     def forward(self, content, style):
+        if not self.training:
+            self.adain.eval()
         encoded_style = self.encode_with_save(style)
         encoded_content = self.encode(content)
-
         t = self.adain(encoded_content, encoded_style[-1])
+
 
         g_t = self.decoder(t)
 
+        if not self.training:
+            return g_t
         g_t_encoding = self.encode_with_save(g_t)
 
         s_loss = self.style_loss(g_t_encoding, encoded_style)

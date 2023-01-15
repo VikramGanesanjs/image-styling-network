@@ -13,6 +13,7 @@ def concat_img(imgs, batch):
     axs = plt.imshow(np.concatenate(imgs.tolist(), axis=1))
     plt.axis('off')
     plt.savefig("../../produced-images/batch{}img.png".format(batch))
+    plt.close()
 
 def concat_img(imgs, batch):
     plt.figure()
@@ -32,6 +33,9 @@ def mean_and_std_of_image(x):
     std = x.var(dim=2).sqrt()
     #reshape mean and std to size (batch_size, num_channels, 1, 1)
     #because mean and std are sort of a scalar quantity the last two dimensions are both 1
+    # mean = mean.view(mean.shape[0], mean.shape[1], 1, 1)
+    # std = std.view(std.shape[0], std.shape[1], 1, 1)
+
     mean = mean.view(mean.shape[0], mean.shape[1], 1, 1)
     std = std.view(std.shape[0], std.shape[1], 1, 1)
 
