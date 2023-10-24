@@ -1,4 +1,5 @@
-# Image Styling using a special function called ADaIN
+# Image Styling Network
+
 
 In an attempt to more deeply learn machine learning concepts, I built this machine learning model which can apply the style of one image on to another. It was trained on images of
 art from different genres and styles, and the network learned how to extract a specific style from an image. Overall, this model was not very refined: most of the style that is pasted over
